@@ -1,7 +1,9 @@
 #!/usr/bin/python
 """ Wikia simplifier.
 
-    Requires: python-requests
+    TODO: Cache cleaned pages; be more aggresive cleaning; write a stylesheet.
+
+    Requires the python-requests package.
 
     Author: Alastair Hughes
     Contact: <hobbitalastair at yandex dot com>
@@ -14,11 +16,38 @@ import re
 
 WIKI = "xwing-miniatures.wikia.com"
 
+class Tag:
+    """ HTML tag representation """
+
+    def __init__(self, tag, attrs):
+        """ Initialise self """
+        self.tag = tag
+        self.attrs = {key: value for key, value in attrs}
+        self.data = None # Optionally can be a list.
+
+    def __str__(self):
+        """ Return a string representation of the given tag """
+        attrs = "".join((' {}="{}"'.format(key, value)
+            for key, value in self.attrs.items()))
+        if self.data != None:
+            # We have data!
+            return "<{tag}{attrs}>{data}</{tag}>\n".format(tag=self.tag, 
+                    attrs=attrs,
+                    data="\n".join(*self.data))
+        # No data.
+        return "<{tag}{attrs}/>".format(tag=self.tag, attrs=attrs)
+
+    def __eq__(self, other):
+        """ Compare, using the tag """
+        return self.tag == other.tag
+
+
 class WikiaCleaner(HTMLParser):
     """ Cleaner for wikia.com pages """
 
     # Special tags.
     WRITE = 1
+    END = 1
     # Ignore fields.
     WHITELIST_ATTRS = {
             'id': ['WikiaPage'],
@@ -35,6 +64,7 @@ class WikiaCleaner(HTMLParser):
                 'wikia.*',
                 'Wikia.*',
                 'wikia-ad',
+                'editsection',
                 'skiplinkcontainer',
                 'hidden',
                 'noprint',
@@ -64,15 +94,15 @@ class WikiaCleaner(HTMLParser):
         super().__init__(*args, **kargs)
 
         # We maintain a stack of tags.
-        self.stack = ["end of stack"]
+        self.stack = [self.END]
         # We record wether or not we are writing.
         self.writing = True
-        # We record the result.
-
+        # Save the result.
+        self.result = []
 
     def write(self, form, *args, end=''):
-        """ Write the result to stdout """
-        if self.writing: print(form.format(*args), end=end)
+        """ Save the result """
+        if self.writing: self.result.append(form.format(*args) + end)
 
     def format_tag(self, tag, attrs):
         contents = [tag]
@@ -142,16 +172,22 @@ class WikiaHandler(BaseHTTPRequestHandler):
         self.log_message("%s", "Sending {}...".format(self.path))
 
         # Get the page.
-        page = requests.get("http://" + WIKI)
+        page = requests.get("http://" + WIKI + self.path)
+        self.log_message("%s", page.headers['content-type'])
 
         # Send the headers.
         self.send_response(page.status_code)
-        self.send_header('Content-type', 'text/html')
+        self.send_header('content-type', page.headers['content-type'])
         self.end_headers()
-        
-        # Clean the results and resend.
-        cleaner = WikiaCleaner()
-        self.wfile.write(bytes(cleaner.feed(page.text), page.encoding))
+
+        if page.headers['content-type'].split(";")[0] == "text/html":
+            # HTML; clean and return.
+            cleaner = WikiaCleaner()
+            cleaner.feed(page.text)
+            self.wfile.write(bytes("".join(cleaner.result), page.encoding))
+        else:
+            # Otherwise, bail.
+            self.wfile.write(page.content)
         
 
 if __name__ == "__main__":
