@@ -1,7 +1,7 @@
 #!/usr/bin/python
 """ Wikia simplifier.
 
-    TODO: Cache cleaned pages; be more aggresive cleaning; write a stylesheet.
+    TODO: Be more aggresive cleaning; write a stylesheet.
 
     Requires the python-requests package.
 
@@ -13,8 +13,7 @@ import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from html.parser import HTMLParser
 import re
-
-WIKI = "xwing-miniatures.wikia.com"
+import time
 
 class Tag:
     """ HTML tag representation """
@@ -163,33 +162,54 @@ class WikiaCleaner(HTMLParser):
     def handle_data(self, data):
         self.write("{}", data)
 
+def gen_handler(wiki, stale=60*60*24):
+    """ Generate a handler for the given wiki """
 
-class WikiaHandler(BaseHTTPRequestHandler):
+    # We cache pages in a dict.
+    # Each entry is a list: [time, content, content-type].
+    cache = {}
 
-    def do_GET(self):
-        """ Write a stripped version of the wiki """
+    class WikiaHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            """ Write a stripped version of the wiki """
 
-        self.log_message("%s", "Sending {}...".format(self.path))
+            def send(status, content, content_type):
+                """ Send the result """
+                self.send_response(status)
+                self.send_header('content-type', content_type)
+                self.end_headers()
+                self.wfile.write(content)
 
-        # Get the page.
-        page = requests.get("http://" + WIKI + self.path)
-        self.log_message("%s", page.headers['content-type'])
+            cur_time = time.time()
+            if self.path in cache and cache[self.path][0] + stale > cur_time:
+                # We use the cached page.
+                _, content, content_type = cache[self.path]
+                self.log_message("%s", "Cached: {}".format(self.path))
+                send(200, content, content_type)
+                return
 
-        # Send the headers.
-        self.send_response(page.status_code)
-        self.send_header('content-type', page.headers['content-type'])
-        self.end_headers()
+            # Get the page.
+            self.log_message("%s", "Preparing {}...".format(self.path))
+            page = requests.get("http://" + wiki + self.path)
 
-        if page.headers['content-type'].split(";")[0] == "text/html":
-            # HTML; clean and return.
-            cleaner = WikiaCleaner()
-            cleaner.feed(page.text)
-            self.wfile.write(bytes("".join(cleaner.result), page.encoding))
-        else:
-            # Otherwise, bail.
-            self.wfile.write(page.content)
+            # Prepare the response.
+            if page.headers['content-type'].split(";")[0] == "text/html":
+                # HTML; clean and return.
+                cleaner = WikiaCleaner()
+                cleaner.feed(page.text)
+                out = bytes("".join(cleaner.result), page.encoding)
+            else:
+                # Otherwise, bail.
+                out = page.content
+
+            # Send and cache.
+            send(page.status_code, out, page.headers['content-type'])
+            cache[self.path] = [cur_time, out, page.headers['content-type']]
+
+    return WikiaHandler
         
 
 if __name__ == "__main__":
-    httpd = HTTPServer(("127.0.0.1", 8000), WikiaHandler)
+    WIKI = "xwing-miniatures.wikia.com"
+    httpd = HTTPServer(("127.0.0.1", 8000), gen_handler(WIKI))
     httpd.serve_forever()
