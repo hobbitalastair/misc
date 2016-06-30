@@ -1,8 +1,6 @@
 #!/usr/bin/python
 """ Wikia simplifier.
 
-    TODO: Be more aggresive cleaning; write a stylesheet.
-
     Requires the python-requests package.
 
     Author: Alastair Hughes
@@ -15,7 +13,7 @@ from html.parser import HTMLParser
 import re
 import time
 
-# Ignore fields.
+# Whitelist/blacklist fields for cleaning the page.
 WHITELIST_ATTRS = {
         'id': ['WikiaPage'],
         'class': ('mw-headline',
@@ -53,7 +51,7 @@ BLACKLIST_ATTRS = {
             'CategorySelect',
             'activityfeed',
             'close',
-            'WikiNav', # TODO: Remove this; style instead?
+            'WikiNav',
             'toc',
             ),
         }
@@ -229,6 +227,47 @@ def gen_handler(wiki, stale=60*60*24):
         
 
 if __name__ == "__main__":
-    WIKI = "xwing-miniatures.wikia.com"
-    httpd = HTTPServer(("127.0.0.1", 8000), gen_handler(WIKI))
+    # Run a server.
+
+    # Parse the arguments.
+    import sys
+    usage = "{}: [--ip <ip>] [--port <port>] <wiki>".format(sys.argv[0])
+    WIKI = None
+    IP = "127.0.0.1"
+    PORT = 8000
+    i = 1
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg in ('-h', '--help'):
+            print(usage)
+            exit(0)
+        elif arg in ('--ip', '--port'):
+            if len(sys.argv) > i + 1:
+                i += 2
+                if arg[2:] == 'ip':
+                    IP = sys.argv[i + 1]
+                elif arg[2:] == 'port':
+                    try:
+                        PORT = int(sys.argv[i + 1])
+                    except ValueError:
+                        print("Expected an int for the port, got {}".format( \
+                                sys.argv[i + 1]))
+            else:
+                print(usage)
+                print("Argument '{}' not followed by a value".format(arg))
+                exit(1)
+        elif WIKI == None:
+            WIKI = arg
+            i += 1
+        else:
+            print(usage)
+            print("Unknown argument '{}'!".format(arg))
+            exit(2)
+    if WIKI == None:
+        print(usage)
+        print("No wiki given!")
+        exit(3)
+
+    # Start the server.
+    httpd = HTTPServer((IP, PORT), gen_handler(WIKI))
     httpd.serve_forever()
