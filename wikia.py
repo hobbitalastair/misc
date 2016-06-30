@@ -15,155 +15,168 @@ from html.parser import HTMLParser
 import re
 import time
 
-class Tag:
-    """ HTML tag representation """
+# Ignore fields.
+WHITELIST_ATTRS = {
+        'id': ['WikiaPage'],
+        'class': ('mw-headline',
+            'WikiaSiteWrapper',
+            'WikiaPage.*',
+            'WikiaMainContent.*',
+            'WikiaArticle',
+            )
+        }
+BLACKLIST_ATTRS = {
+        'id': ['Wikia.*'],
+        'class': (
+            'wikia.*',
+            'Wikia.*',
+            'wikia-ad',
+            'editsection',
+            'skiplinkcontainer',
+            'hidden',
+            'noprint',
+            'global-navigation',
+            'table-cell hubs-links', # TODO: Remove this?
+            'account-navigation-container',
+            'search-container',
+            'start-wikia-container',
+            'navbackground',
+            'hiddenLinks',
+            'tally',
+            'talk',
+            'main-page-tag-rcs',
+            'pollAnswerVotes',
+            'edited-by',
+            'printfooter',
+            'global-footer',
+            'ajax-poll',
+            'CategorySelect',
+            'activityfeed',
+            'close',
+            'WikiNav', # TODO: Remove this; style instead?
+            'toc',
+            ),
+        }
+TAG_BLACKLIST = {'script', 'noscript', 'link', 'meta'}
+DATA_BLACKLIST = {'Wikia', 'Advertisement'}
 
-    def __init__(self, tag, attrs):
+
+class Tag:
+    """ Recursive HTML tag representation """
+
+    def __init__(self, tag, attrs=[]):
         """ Initialise self """
         self.tag = tag
         self.attrs = {key: value for key, value in attrs}
-        self.data = None # Optionally can be a list.
+        self.data = []  # List of associated data/children.
 
     def __str__(self):
         """ Return a string representation of the given tag """
         attrs = "".join((' {}="{}"'.format(key, value)
             for key, value in self.attrs.items()))
-        if self.data != None:
+        if len(self.data) != 0:
             # We have data!
             return "<{tag}{attrs}>{data}</{tag}>\n".format(tag=self.tag, 
                     attrs=attrs,
-                    data="\n".join(*self.data))
+                    data="".join((str(d) for d in self.data)))
         # No data.
         return "<{tag}{attrs}/>".format(tag=self.tag, attrs=attrs)
 
+    def __repr__(self):
+        """ Return a representation of self """
+        return "<{}, {}, {}>".format(self.tag, self.attrs, self.data)
+
     def __eq__(self, other):
         """ Compare, using the tag """
-        return self.tag == other.tag
+        if type(other) == Tag:
+            return self.tag == other.tag
+        elif type(other) == str:
+            return self.tag == other
+        return False
 
 
-class WikiaCleaner(HTMLParser):
-    """ Cleaner for wikia.com pages """
-
-    # Special tags.
-    WRITE = 1
-    END = 1
-    # Ignore fields.
-    WHITELIST_ATTRS = {
-            'id': ['WikiaPage'],
-            'class': ('mw-headline',
-                'WikiaSiteWrapper',
-                'WikiaPage.*',
-                'WikiaMainContent.*',
-                'WikiaArticle',
-                )
-            }
-    BLACKLIST_ATTRS = {
-            'id': ['Wikia.*'],
-            'class': (
-                'wikia.*',
-                'Wikia.*',
-                'wikia-ad',
-                'editsection',
-                'skiplinkcontainer',
-                'hidden',
-                'noprint',
-                'global-navigation',
-                'table-cell hubs-links', # TODO: Remove this?
-                'account-navigation-container',
-                'search-container',
-                'start-wikia-container',
-                'navbackground',
-                'hiddenLinks',
-                'tally',
-                'talk',
-                'main-page-tag-rcs',
-                'pollAnswerVotes',
-                'edited-by',
-                'printfooter',
-                'global-footer',
-                'ajax-poll',
-                'CategorySelect',
-                'activityfeed',
-                ),
-            }
-    TAG_BLACKLIST = {'script', 'noscript', 'link', 'meta'}
+class TagTreeGenerator(HTMLParser):
+    """ Tag tree generator for HTML """
 
     def __init__(self, *args, **kargs):
         """ Initialise self """
         super().__init__(*args, **kargs)
-
-        # We maintain a stack of tags.
-        self.stack = [self.END]
-        # We record wether or not we are writing.
-        self.writing = True
-        # Save the result.
-        self.result = []
-
-    def write(self, form, *args, end=''):
-        """ Save the result """
-        if self.writing: self.result.append(form.format(*args) + end)
-
-    def format_tag(self, tag, attrs):
-        contents = [tag]
-        for key, value in attrs:
-            contents.append(" {}=\"{}\"".format(key, value))
-        return "".join(contents)
-
-    def ignore(self, tag, attrs):
-        """ Return true if we ignore this tag """
-        if tag in self.TAG_BLACKLIST: return True
-        for attr_list, response in ((self.WHITELIST_ATTRS, False),
-                (self.BLACKLIST_ATTRS, True)):
-            for key, value in attrs:
-                if key in attr_list:
-                    for match in attr_list[key]:
-                        for v in value.split():
-                            if re.fullmatch(match, v) != None:
-                                return response
-        return False
+        self.stack = []
 
     def handle_starttag(self, tag, attrs):
         """ Handle start tags """
-
-        # Check wether to ignore the tag.
-        if self.ignore(tag, attrs) and self.writing:
-            self.writing = False
-            self.stack.append(self.WRITE)
-        self.stack.append(tag)
-        self.write("<{}>", self.format_tag(tag, attrs))
+        self.stack.append(Tag(tag, attrs))
 
     def handle_endtag(self, tag):
         """ Handle end of tags """
 
-        # Ignore mismatched tags.
-        if len(self.stack) <= 1: return
-        if self.stack[-1] != tag:
-            # Bother; we have some tag that was not terminated.
-            if tag in self.stack:
-                # The tag is in the stack; pop off, ensuring to catch
-                # any WRITE markers.
-                while self.stack[-1] != tag:
-                    if self.stack.pop() == self.WRITE:
-                        self.writing = True
-
-        self.write("</{}>", tag, end='\n')
-
-        # Handle the stack.
-        self.stack.pop()
-        if self.stack[-1] == self.WRITE:
-            self.stack.pop()
-            self.writing = True
+        # Find all children of this tag.
+        if self.stack[-1].tag != tag and tag in self.stack:
+            # The unterminated tag is in the stack; assume that "higher" tags
+            # are it's children.
+            children = []
+            while self.stack[-1].tag != tag: children.append(self.stack.pop())
+            self.stack[-1].data += reversed(children)
 
     def handle_startendtag(self, tag, attrs):
         """ Handle combined start+end tags """
-        if not self.ignore(tag, attrs):
-            self.write("<{}/>", self.format_tag(tag, attrs))
+        self.stack.append(Tag(tag, attrs))
 
     def handle_data(self, data):
-        self.write("{}", data)
+        """ Save the data encountered """
+        stripped = data.strip("\t\n")
+        if len(self.stack) > 0 and len(stripped) != 0:
+            self.stack[-1].data.append(stripped)
+
+
+def ignore(tag):
+    """ Return true if we ignore this tag """
+    if tag.tag in TAG_BLACKLIST: return True
+    for d in tag.data:
+        if type(d) == str and d in DATA_BLACKLIST:
+            return True
+    for attr_list, response in ((WHITELIST_ATTRS, False),
+            (BLACKLIST_ATTRS, True)):
+        for key, value in tag.attrs.items():
+            if key in attr_list:
+                for match in attr_list[key]:
+                    for v in value.split():
+                        if re.fullmatch(match, v) != None:
+                            return response
+    return False
+
+
+def clean(tag):
+    """ Clean the given page, assumed to be in tree form.
+        This assumes that all Wikia pages follow approximately the same form...
+    """
+
+    children = []
+    for child in tag.data:
+        if type(child) == Tag:
+            if ignore(child): continue # Ignore children.
+            # Recurse.
+            child = clean(child)
+            # Check if we bail.
+            if child is None: break
+            if 'Forum Activity' in child.data: return None
+
+            # Ignore empty tags.
+            if child.tag in {'div', 'p'} and len(child.data) == 0:
+                continue
+            # Make images load the image directly.
+            if child.tag == "img" and 'data-src' in child.attrs:
+                child.attrs['src'] = child.attrs['data-src']
+        children.append(child)
+    tag.data = children
+    return tag
+
 
 def gen_handler(wiki, stale=60*60*24):
-    """ Generate a handler for the given wiki """
+    """ Generate a handler for the given wiki.
+        By default, content is considered stale after 24 hours; 'stale' is
+        given in seconds.
+    """
 
     # We cache pages in a dict.
     # Each entry is a list: [time, content, content-type].
@@ -171,7 +184,7 @@ def gen_handler(wiki, stale=60*60*24):
 
     class WikiaHandler(BaseHTTPRequestHandler):
         def do_GET(self):
-            """ Write a stripped version of the wiki """
+            """ Get a stripped version of the wikia page """
 
             def send(status, content, content_type):
                 """ Send the result """
@@ -194,10 +207,16 @@ def gen_handler(wiki, stale=60*60*24):
 
             # Prepare the response.
             if page.headers['content-type'].split(";")[0] == "text/html":
-                # HTML; clean and return.
-                cleaner = WikiaCleaner()
-                cleaner.feed(page.text)
-                out = bytes("".join(cleaner.result), page.encoding)
+                # HTML; parse, clean and return.
+                html = TagTreeGenerator()
+                html.feed(page.text)
+                if len(html.stack) > 0:
+                    tree = clean(html.stack[-1])
+                    out = bytes(str(tree), page.encoding)
+                else:
+                    # Invalid HTML?
+                    self.log_error("Invalid HTML for page '%s'", self.path)
+                    out = bytes(page.text, page.encoding)
             else:
                 # Otherwise, bail.
                 out = page.content
