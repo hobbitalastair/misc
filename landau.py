@@ -8,6 +8,8 @@
 """
 
 from fractions import gcd
+from math import sqrt, ceil, floor
+
 
 def product(factors):
     """ Return the product of the given set of numbers """
@@ -41,7 +43,32 @@ def add_factor(i, n, factors):
     return factors
 
 
-def landau(n):
+def primish(n):
+    """ Return a set of numbers which are either primes or powers of a prime,
+        up to and including the value of n.
+    """
+
+    factors = set()
+    for i in range(n, 1, -1):
+
+        # Find the smallest divisor of i.
+        smallest = 2
+        while (i % smallest) != 0:
+            smallest += 1
+
+        # Divide by that divisor until we have 1 or something else.
+        remainder = i
+        while (remainder % smallest) == 0:
+            remainder /= smallest
+
+        # Keep it if needed.
+        if remainder == 1:
+            factors.add(i)
+
+    return factors
+
+
+def landau1(n):
     """ Return the landau function for the given value of n.
     
         We increment a counter. Whenever we increment the counter, we decide
@@ -65,10 +92,25 @@ def landau(n):
                 sum_factors = sum(factors)
         i += 1
 
-    print(n, sum(factors), factors)
+    print(n, product(factors), factors)
+    return product(factors)
+
+
+def landau2(n):
+    """ Return the landau function for the given value of n.
+
+        We begin with the set of all values up to and including n, then reduce
+        that until we have a set with a sum less than n.
+    """
+
+    factors = primish(n)
+
+    # TODO: I have no idea here...
+
+    #assert sum(factors) <= n
     return product(factors)
 
 
 if __name__ == "__main__":
-    for i in range(20):
-        print("{}: {}".format(i, landau(i)))
+    for i in range(30):
+        print("{}: {} {}".format(i, landau1(i), landau2(i)))
