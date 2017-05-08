@@ -115,6 +115,9 @@ def tree(vertices, edges):
         True
 
         Complete graphs:
+        Note that we expect to have (|v| // 2) + 1 trees, since each tree can
+        visit at most |v| - 1 edges, and there are (|v| * (|v| - 1)) / 2 edges
+        in total, or roughly |v|^2 / 2 edges.
         >>> v = [TreeVertex() for i in range(3)]
         >>> e = complete(v); tree(v, e); is_colouring(v, e)
         Trees: 2, colours: 3
@@ -130,9 +133,9 @@ def tree(vertices, edges):
         Trees: 11, colours: 20
         True
 
-        >>> v = [TreeVertex() for i in range(200)]
+        >>> v = [TreeVertex() for i in range(50)]
         >>> e = complete(v); tree(v, e); is_colouring(v, e)
-        Trees: 101, colours: 200
+        Trees: 26, colours: 50
         True
 
         Cycles:
@@ -157,15 +160,12 @@ def tree(vertices, edges):
         True
 
         Wheels:
-        For both these graphs the algorithm performs badly.
-        It should be possible to find a colouring using 3-4 colours quickly.
-        Ideally, the algorithm would only generate two trees.
         >>> w = 6
         >>> v = [TreeVertex() for i in range(w)]
         >>> e = [(i, (i + 1) % (w - 1)) for i in range(w - 1)] + \
                 [((w - 1), i) for i in range((w - 1))]
         >>> tree(v, e); is_colouring(v, e)
-        Trees: 3, colours: 5
+        Trees: 2, colours: 4
         True
 
         >>> w = 7
@@ -173,13 +173,20 @@ def tree(vertices, edges):
         >>> e = [(i, (i + 1) % (w - 1)) for i in range(w - 1)] + \
                 [((w - 1), i) for i in range((w - 1))]
         >>> tree(v, e); is_colouring(v, e)
-        Trees: 3, colours: 5
+        Trees: 2, colours: 3
         True
     """
 
     # Keep track of all visited and unvisited edges.
     unvisited = set(edges)
     visited = []
+
+    # Cache the degree of each vertex
+    degrees = {i: 0 for i, _ in enumerate(vertices)}
+    for e in edges:
+        degrees[e[0]] += 1
+        degrees[e[1]] += 1
+
 
     while len(unvisited) > 0:
         # Create a tree.
@@ -233,7 +240,26 @@ def tree(vertices, edges):
                 components[c2].add(e[0])
             return 1
 
-        for e in unvisited: tree_size += try_edge(e)
+        # The algorithm here needs to be careful when picking trees - a
+        # simple pathological case is for wheels, where random trees often
+        # end up needing three trees instead of two.
+        #
+        # A good rule-of-thumb seems to be to pick the edge with the minimum
+        # degree of the first vertex, then of the second vertex, then the
+        # vertex with a minimum number of total adjacent edges from earlier
+        # trees, then by the second vertex having the minimum number of total
+        # adjacent edges.
+        #
+        # The implementation here just relies on picking using a minimal
+        # degree.
+        # TODO: A priority queue or similar should be able to provide a
+        #       speedup here.
+        remaining = unvisited.copy()
+        while len(remaining) > 0:
+            e = min(remaining, key=lambda e: min(degrees[e[0]], degrees[e[1]]))
+            remaining.remove(e)
+            tree_size += try_edge(e)
+
         v_p = 0 # Visited edge position marker.
         while tree_size < (len(vertices) - 1):
             # Add a vertex to the tree from the 'visited' vertices.
@@ -268,6 +294,14 @@ def tree(vertices, edges):
                         children.append(child)
 
     # Colour the graph.
+    #
+    # Note that the result can be expressed as a much simplified graph, where
+    # there are 2^k vertices, where k is the number of trees, and there is an
+    # edge for each pair of vertices which cannot be the same colour.
+    # The solution is then a colouring of that graph (!)
+    #
+    # The current method could be made more optimal, eg if the requirement for
+    # a tree was relaxed to just a forest.
     colours = set()
     for v in vertices:
         v.colour = sum([b << i for i, b in enumerate(v.colouring)])
