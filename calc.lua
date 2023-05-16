@@ -1,13 +1,15 @@
 #!/usr/bin/env lua
 -- Small stack based calculator, for learning a little bit of Lua
 
+
+
 function tokenize(expr)
     local tokens = {}
     -- Note; tables are unordered! So I can't assume ordering here
     local patterns = {
         ["^%d+"] = function(m) table.insert(tokens, tonumber(m)) end,
         ["^%l+"] = function(m) table.insert(tokens, m) end,
-        ["^[%+%-%*/()]"] = function(m) table.insert(tokens, m) end,
+        ["^[%+%-%*/]"] = function(m) table.insert(tokens, m) end,
         ["^%s+"] = function(m) end
     }
 
@@ -31,26 +33,40 @@ function tokenize(expr)
     return tokens, false
 end
 
+function evaluate(tokens, start, count)
+    if count == 1 and type(tokens[start]) == "number" then
+        return tokens[start]
+    elseif count == 2 then
+        if tokens[start] == "-" and type(tokens[start + 1]) == "number" then
+            return 0 - tokens[start + 1]
+        else
+            return "Invalid fragment"
+        end
+    elseif count >= 3 then
+        local op = tokens[start + count - 2]
+        local end_is_num = type(tokens[start + count - 1]) == "number"
+        if op == "+" and end_is_num then
+            return evaluate(tokens, start, count - 2) + tokens[start + count - 1]
+        elseif op == "-" and end_is_num then
+            return evaluate(tokens, start, count - 2) - tokens[start + count - 1]
+        else
+            return "Invalid fragment"
+        end
+    else
+        return "Invalid fragment"
+    end
+end
+
 function calculate(expr)
     local tokens, err = tokenize(expr)
     if err then
         return err
     end
-
-    local stack = {}
-    for _, token in ipairs(tokens) do
-        if type(token) == "number" then
-            table.insert(stack, token)
-        elseif token == "+" then
-            local op1 = table.remove(stack)
-            local op2 = table.remove(stack)
-            table.insert(stack, op1 + op2)
-        else
-            return "Unknown token " .. token
-        end
+    if #tokens == 0 then
+        return ""
     end
 
-    return tostring(stack[1])
+    return tostring(evaluate(tokens, 1, #tokens))
 end
 
 function repl ()
@@ -66,4 +82,29 @@ function repl ()
     end
 end
 
-repl()
+function run_tests()
+    check_expr = function(a, b)
+        io.write(a .. " => ")
+        io.flush()
+        local result = calculate(a)
+        local expected = tostring(b)
+        if result ~= expected then
+            io.write(result .. " != " .. expected .. "\n")
+        else
+            io.write(expected .. "\n")
+        end
+    end
+    check_expr("5", 5)
+    check_expr("5 - 3 + 9", 11)
+    check_expr("5 + 3 - 9", -1)
+    check_expr("-3 + -4", -7)
+    check_expr("0 - -7", 7)
+end
+
+if #arg == 0 then
+    repl()
+elseif arg[1] == "--test" then
+    run_tests()
+else
+    io.write("Unknown arguments\n")
+end
