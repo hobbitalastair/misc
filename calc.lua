@@ -33,28 +33,44 @@ function tokenize(expr)
     return tokens, false
 end
 
-function evaluate(tokens, start, count)
-    if count == 1 and type(tokens[start]) == "number" then
-        return tokens[start]
-    elseif count == 2 then
-        if tokens[start] == "-" and type(tokens[start + 1]) == "number" then
-            return 0 - tokens[start + 1]
-        else
-            return "Invalid fragment"
-        end
-    elseif count >= 3 then
-        local op = tokens[start + count - 2]
-        local end_is_num = type(tokens[start + count - 1]) == "number"
-        if op == "+" and end_is_num then
-            return evaluate(tokens, start, count - 2) + tokens[start + count - 1]
-        elseif op == "-" and end_is_num then
-            return evaluate(tokens, start, count - 2) - tokens[start + count - 1]
-        else
-            return "Invalid fragment"
-        end
+function consume_number(tokens, start, count)
+    if count >= 1 and type(tokens[start]) == "number" then
+        return tokens[start], 1
+    elseif count >= 2 and tokens[start] == "-" and type(tokens[start + 1]) == "number" then
+        return 0 - tokens[start + 1], 2
     else
-        return "Invalid fragment"
+        return "Invalid number", count
     end
+end
+
+function evaluate_plus_or_minus(tokens, start, count)
+    local sum, consumed = consume_number(tokens, start, count)
+    if consumed == 0 then
+        return "Invalid number"
+    end
+    start = start + consumed
+    count = count - consumed
+
+    while count >= 2 do
+        local operator = tokens[start]
+        start = start + 1
+        count = count - 1
+
+        local new_number, consumed = consume_number(tokens, start, count)
+        if consumed == 0 then
+            return "Invalid number"
+        end
+        start = start + consumed
+        count = count - consumed
+
+        if operator == "+" then
+            sum = sum + new_number
+        elseif operator == "-" then
+            sum = sum - new_number
+        end
+    end
+
+    return sum
 end
 
 function calculate(expr)
@@ -66,7 +82,8 @@ function calculate(expr)
         return ""
     end
 
-    return tostring(evaluate(tokens, 1, #tokens))
+
+    return tostring(evaluate_plus_or_minus(tokens, 1, #tokens))
 end
 
 function repl ()
@@ -95,6 +112,7 @@ function run_tests()
         end
     end
     check_expr("5", 5)
+    check_expr("-13", -13)
     check_expr("5 - 3 + 9", 11)
     check_expr("5 + 3 - 9", -1)
     check_expr("-3 + -4", -7)
